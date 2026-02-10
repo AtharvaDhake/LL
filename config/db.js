@@ -1,23 +1,41 @@
+/* config/db.js */
 const mongoose = require("mongoose");
 
-let isConnected = false; // Track connection status
+let cached = global.mongoose;
+
+if (!cached) {
+  cached = global.mongoose = { conn: null, promise: null };
+}
 
 const connectDB = async () => {
-  if (isConnected) {
-    console.log("Using existing MongoDB connection");
-    return;
+  // If we have a cached connection, use it
+  if (cached.conn) {
+    return cached.conn;
+  }
+
+  // If no connection promise exists, create one
+  if (!cached.promise) {
+    const opts = {
+      bufferCommands: false, // Turn off buffering so we fail fast if no connection
+    };
+
+    cached.promise = mongoose
+      .connect(process.env.MONGO_URI, opts)
+      .then((mongoose) => {
+        console.log("Details: New MongoDB Connection Established");
+        return mongoose;
+      });
   }
 
   try {
-    const conn = await mongoose.connect(process.env.MONGO_URI);
-
-    isConnected = conn.connections[0].readyState;
-    console.log("MongoDB connected successfully");
-  } catch (err) {
-    console.error("MongoDb connection failed.", err);
-    // In serverless, we don't want to exit the process as it kills the container
-    // allowing cold starts to retry connectivity might be better
+    cached.conn = await cached.promise;
+  } catch (e) {
+    cached.promise = null; // Reset promise if it failed so we can retry
+    console.error("MongoDB Connection Failed:", e);
+    throw e;
   }
+
+  return cached.conn;
 };
 
 module.exports = connectDB;
